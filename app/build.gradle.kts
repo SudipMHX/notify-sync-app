@@ -17,7 +17,7 @@ val hasReleaseSigning = keystorePropertiesFile.exists() &&
 
 val notifySyncServerUrl = providers.gradleProperty("notifySyncServerUrl")
     .orElse(providers.environmentVariable("NOTIFYSYNC_SERVER_URL"))
-    .getOrElse("https://000n.vercel.app")
+    .getOrElse("https://notify-sync-dashboard.onrender.com")
 val escapedServerUrl = notifySyncServerUrl.trimEnd('/')
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
