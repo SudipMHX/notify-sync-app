@@ -19,6 +19,7 @@ import com.sudipmhx.notifysync.R
 class PermissionActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
+    private lateinit var stepText: TextView
     private lateinit var actionButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,6 +27,7 @@ class PermissionActivity : AppCompatActivity() {
         setContentView(R.layout.activity_permission)
 
         statusText = findViewById(R.id.statusText)
+        stepText = findViewById(R.id.stepText)
         actionButton = findViewById(R.id.actionButton)
 
         updateUI()
@@ -39,18 +41,21 @@ class PermissionActivity : AppCompatActivity() {
     private fun updateUI() {
         when {
             !hasSmsPermission() -> {
-                statusText.text = "NotifySync needs SMS permission to capture incoming messages."
-                actionButton.text = "Grant SMS Permission"
+                stepText.setText(R.string.step_one)
+                statusText.setText(R.string.sms_permission_message)
+                actionButton.setText(R.string.grant_sms_permission)
                 actionButton.setOnClickListener { requestSmsPermission() }
             }
             !hasNotificationAccess() -> {
-                statusText.text = "NotifySync needs Notification Access to capture incoming notifications."
-                actionButton.text = "Grant Notification Access"
+                stepText.setText(R.string.step_two)
+                statusText.setText(R.string.notification_permission_message)
+                actionButton.setText(R.string.open_notification_settings)
                 actionButton.setOnClickListener { requestNotificationAccess() }
             }
             !isIgnoringBatteryOptimizations() -> {
-                statusText.text = "NotifySync needs to run in the background to sync data reliably."
-                actionButton.text = "Ignore Battery Optimizations"
+                stepText.setText(R.string.step_three)
+                statusText.setText(R.string.battery_permission_message)
+                actionButton.setText(R.string.allow_background_sync)
                 actionButton.setOnClickListener { requestIgnoreBatteryOptimizations() }
             }
             else -> {

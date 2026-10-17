@@ -1,41 +1,35 @@
 package com.sudipmhx.notifysync.ui
 
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.sudipmhx.notifysync.data.ApiClient
-import com.sudipmhx.notifysync.data.model.RegisterRequest
+import com.sudipmhx.notifysync.R
+import com.sudipmhx.notifysync.data.DeviceRegistration
 import com.sudipmhx.notifysync.util.PrefsManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class SplashActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // No layout needed for splash, or use a simple one
+        setContentView(R.layout.activity_splash)
         val prefs = PrefsManager(this)
 
-        if (prefs.getApiKey() != null) {
+        if (DeviceRegistration.isRegistered(prefs)) {
             goNext()
             return
         }
 
-        val deviceName = Build.MODEL
-        val androidVersion = Build.VERSION.RELEASE
-
         lifecycleScope.launch {
             try {
-                val res = ApiClient.getService(this@SplashActivity).register(
-                    RegisterRequest(deviceName, androidVersion)
-                )
-                prefs.saveDeviceId(res.deviceId)
-                prefs.saveApiKey(res.apiKey)
+                DeviceRegistration.register(this@SplashActivity)
                 goNext()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                e.printStackTrace()
-                // If registration fails (e.g. no internet or server down), 
-                // we still want the user to be able to open the app.
+                Log.e(TAG, "Device registration failed", e)
                 goNext()
             }
         }
@@ -44,5 +38,9 @@ class SplashActivity : AppCompatActivity() {
     private fun goNext() {
         startActivity(Intent(this, PermissionActivity::class.java))
         finish()
+    }
+
+    companion object {
+        private const val TAG = "SplashActivity"
     }
 }

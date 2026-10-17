@@ -18,6 +18,12 @@ class PrefsManager(context: Context) {
         prefs.edit().putString("api_key", apiKey).apply()
     }
 
+    fun saveRegistration(deviceId: String, apiKey: String): Boolean =
+        prefs.edit()
+            .putString("device_id", deviceId)
+            .putString("api_key", apiKey)
+            .commit()
+
     fun getApiKey(): String? {
         return prefs.getString("api_key", null)
     }
@@ -33,4 +39,10 @@ class PrefsManager(context: Context) {
     fun clear() {
         prefs.edit().clear().apply()
     }
+
+    fun clearRegistration(): Boolean =
+        prefs.edit()
+            .remove("device_id")
+            .remove("api_key")
+            .commit()
 }
