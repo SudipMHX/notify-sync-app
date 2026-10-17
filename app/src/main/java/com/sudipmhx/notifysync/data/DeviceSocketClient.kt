@@ -21,17 +21,22 @@ class DeviceSocketClient(context: Context) {
     init {
         val apiKey = PrefsManager(context.applicationContext).getApiKey()
             ?: throw IllegalStateException("Device API key is not available")
+        val cleanUrl = BuildConfig.SERVER_URL.trimEnd('/')
         val options = IO.Options.builder()
             .setAuth(mapOf("apiKey" to apiKey))
+            .setTransports(arrayOf("websocket", "polling"))
             .setReconnection(false)
             .setTimeout(CONNECT_TIMEOUT_MS)
             .setForceNew(true)
             .build()
-        socket = IO.socket(URI.create(BuildConfig.SERVER_URL), options)
+        socket = IO.socket(URI.create(cleanUrl), options)
     }
 
-    suspend fun connect(): Boolean =
-        withTimeoutOrNull(CONNECT_TIMEOUT_MS + 1_000) {
+    fun isConnected(): Boolean = socket.connected()
+
+    suspend fun connect(): Boolean {
+        if (socket.connected()) return true
+        return withTimeoutOrNull(CONNECT_TIMEOUT_MS + 1_000) {
             suspendCancellableCoroutine { continuation ->
                 socket.once(Socket.EVENT_CONNECT) {
                     if (continuation.isActive) continuation.resume(true)
@@ -43,6 +48,7 @@ class DeviceSocketClient(context: Context) {
                 socket.connect()
             }
         } ?: false
+    }
 
     suspend fun send(event: String, payload: Any): Boolean {
         return try {
@@ -70,12 +76,15 @@ class DeviceSocketClient(context: Context) {
     }
 
     fun close() {
-        socket.disconnect()
-        socket.close()
+        try {
+            socket.disconnect()
+            socket.close()
+        } catch (_: Exception) {
+        }
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 12_000L
+        private const val CONNECT_TIMEOUT_MS = 15_000L
         private const val ACK_TIMEOUT_MS = 15_000L
     }
 }

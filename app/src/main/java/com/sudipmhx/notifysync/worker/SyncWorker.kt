@@ -88,7 +88,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     return Result.success()
                 }
 
-                var hasFailure = heartbeatFailed
+                var hasItemFailure = false
 
                 for (item in pendingItems) {
                     try {
@@ -111,7 +111,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                                 val response = service.sendNotification(normalizedPayload)
                                 if (!handleResponse(item.id, response.code(), response.isSuccessful, response.errorBody()?.string())) {
                                     if (response.code() == 401 || response.code() == 403) return Result.failure()
-                                    hasFailure = true
+                                    hasItemFailure = true
                                 }
                             }
                             "sms" -> {
@@ -132,7 +132,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                                 val response = service.sendSms(normalizedPayload)
                                 if (!handleResponse(item.id, response.code(), response.isSuccessful, response.errorBody()?.string())) {
                                     if (response.code() == 401 || response.code() == 403) return Result.failure()
-                                    hasFailure = true
+                                    hasItemFailure = true
                                 }
                             }
                             else -> {
@@ -149,12 +149,12 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                         db.queueDao().delete(item.id)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to sync queue item ${item.id}", e)
-                        hasFailure = true
+                        hasItemFailure = true
                     }
                 }
 
                 db.queueDao().deleteSynced()
-                if (hasFailure) return Result.retry()
+                if (hasItemFailure) return Result.retry()
             }
         } finally {
             socketClient?.close()

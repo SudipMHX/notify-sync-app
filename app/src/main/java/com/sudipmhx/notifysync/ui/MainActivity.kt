@@ -8,9 +8,10 @@ import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.work.WorkInfo
 import androidx.lifecycle.lifecycleScope
 import com.sudipmhx.notifysync.R
+import com.sudipmhx.notifysync.data.DirectSyncResult
+import com.sudipmhx.notifysync.data.ImmediateSyncManager
 import com.sudipmhx.notifysync.data.DeviceRegistration
 import com.sudipmhx.notifysync.data.local.QueueDatabase
 import com.sudipmhx.notifysync.worker.SyncScheduler
@@ -112,28 +113,32 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                if (!DeviceRegistration.isRegistered(prefs)) {
-                    DeviceRegistration.register(this@MainActivity)
+                val syncResult = withContext(Dispatchers.IO) {
+                    ImmediateSyncManager.syncDirect(this@MainActivity)
                 }
 
-                var syncState = SyncScheduler.syncNow(applicationContext)
-                if (syncState == WorkInfo.State.FAILED && !DeviceRegistration.isRegistered(prefs)) {
-                    DeviceRegistration.register(this@MainActivity)
-                    syncState = SyncScheduler.syncNow(applicationContext)
-                }
                 refreshDashboard()
-                if (syncState == WorkInfo.State.ENQUEUED) {
-                    statusText.setText(R.string.status_sync_pending)
-                    connectionDetailText.setText(R.string.status_sync_pending_detail)
-                    return@launch
-                }
-                if (syncState != WorkInfo.State.SUCCEEDED) {
-                    statusText.setText(R.string.status_check_failed)
-                    connectionDetailText.setText(R.string.status_sync_failed_detail)
-                    return@launch
-                }
 
-                connectionDetailText.setText(R.string.status_refresh_success_detail)
+                when (syncResult) {
+                    is DirectSyncResult.Success -> {
+                        statusText.setText(R.string.status_ready)
+                        connectionDetailText.setText(R.string.status_refresh_success_detail)
+                        SyncScheduler.enqueue(applicationContext)
+                    }
+                    is DirectSyncResult.NetworkError -> {
+                        statusText.setText(R.string.status_sync_pending)
+                        connectionDetailText.setText(R.string.status_sync_pending_detail)
+                        SyncScheduler.enqueue(applicationContext)
+                    }
+                    is DirectSyncResult.AuthError -> {
+                        statusText.setText(R.string.status_check_failed)
+                        connectionDetailText.text = getString(R.string.status_server_error_format, syncResult.statusCode)
+                    }
+                    is DirectSyncResult.Error -> {
+                        statusText.setText(R.string.status_check_failed)
+                        connectionDetailText.text = syncResult.message
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HttpException) {
@@ -171,8 +176,7 @@ class MainActivity : AppCompatActivity() {
         val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     companion object {

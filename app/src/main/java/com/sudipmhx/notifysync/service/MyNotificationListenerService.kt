@@ -6,6 +6,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.google.gson.Gson
+import com.sudipmhx.notifysync.data.ImmediateSyncManager
 import com.sudipmhx.notifysync.data.local.QueueDatabase
 import com.sudipmhx.notifysync.data.local.QueueEntity
 import com.sudipmhx.notifysync.data.model.NotificationPayload
@@ -61,7 +62,8 @@ class MyNotificationListenerService : NotificationListenerService() {
                         jsonPayload = gson.toJson(payload)
                     )
                 )
-                SyncScheduler.enqueue(applicationContext)
+                // Realtime sync immediately over network
+                ImmediateSyncManager.triggerSync(applicationContext)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

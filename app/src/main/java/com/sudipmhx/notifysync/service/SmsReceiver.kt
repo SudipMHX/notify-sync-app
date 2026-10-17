@@ -6,6 +6,7 @@ import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
 import com.google.gson.Gson
+import com.sudipmhx.notifysync.data.ImmediateSyncManager
 import com.sudipmhx.notifysync.data.local.QueueDatabase
 import com.sudipmhx.notifysync.data.local.QueueEntity
 import com.sudipmhx.notifysync.data.model.SmsPayload
@@ -41,7 +42,7 @@ class SmsReceiver : BroadcastReceiver() {
                     )
                 )
                 QueueDatabase.getDatabase(appContext).queueDao().insert(entity)
-                SyncScheduler.enqueue(appContext)
+                ImmediateSyncManager.triggerSync(appContext)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
