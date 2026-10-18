@@ -6,16 +6,22 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.google.gson.Gson
+import com.sudipmhx.notifysync.data.ApiClient
+import com.sudipmhx.notifysync.data.DeviceRegistration
 import com.sudipmhx.notifysync.data.ImmediateSyncManager
 import com.sudipmhx.notifysync.data.local.QueueDatabase
 import com.sudipmhx.notifysync.data.local.QueueEntity
 import com.sudipmhx.notifysync.data.model.NotificationPayload
+import com.sudipmhx.notifysync.util.PrefsManager
 import com.sudipmhx.notifysync.worker.SyncScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -25,6 +31,39 @@ class MyNotificationListenerService : NotificationListenerService() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private val gson = Gson()
     private val appNameCache = ConcurrentHashMap<String, String>()
+    private var heartbeatJob: Job? = null
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (true) {
+                sendPresenceHeartbeat()
+                delay(HEARTBEAT_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun sendPresenceHeartbeat() {
+        val prefs = PrefsManager(applicationContext)
+        if (!DeviceRegistration.isRegistered(prefs)) return
+
+        try {
+            val response = ApiClient.getService(applicationContext).heartbeat()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Device heartbeat failed with HTTP ${response.code()}")
+                if (response.code() == 401 || response.code() == 403) {
+                    ImmediateSyncManager.triggerSync(applicationContext)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            Log.w(TAG, "Device heartbeat could not reach the server", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Device heartbeat failed", e)
+        }
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
@@ -116,6 +155,7 @@ class MyNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "NotificationListener"
+        private const val HEARTBEAT_INTERVAL_MS = 60_000L
     }
 
     override fun onDestroy() {

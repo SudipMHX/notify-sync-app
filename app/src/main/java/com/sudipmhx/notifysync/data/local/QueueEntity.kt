@@ -8,5 +8,6 @@ data class QueueEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val type: String,        // "notification" or "sms"
     val jsonPayload: String, // serialized payload
-    val synced: Boolean = false
+    val synced: Boolean = false,
+    val failureCount: Int = 0
 )

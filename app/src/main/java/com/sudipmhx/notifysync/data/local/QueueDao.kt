@@ -21,6 +21,9 @@ interface QueueDao {
     @Query("UPDATE sync_queue SET synced = 1 WHERE id = :id")
     suspend fun markSynced(id: Int)
 
+    @Query("UPDATE sync_queue SET failureCount = failureCount + 1 WHERE id = :id")
+    suspend fun incrementFailureCount(id: Int): Int
+
     @Query("DELETE FROM sync_queue WHERE id = :id")
     suspend fun delete(id: Int)
 

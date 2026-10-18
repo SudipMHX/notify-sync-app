@@ -27,7 +27,7 @@ object SyncScheduler {
             .build()
 
         WorkManager.getInstance(appContext)
-            .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+            .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 
     suspend fun syncNow(context: Context): WorkInfo.State {
@@ -41,7 +41,7 @@ object SyncScheduler {
 
         workManager.enqueueUniqueWork(
             WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             request
         )
 

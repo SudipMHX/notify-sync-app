@@ -13,6 +13,7 @@ import com.sudipmhx.notifysync.worker.SyncScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -20,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.time.DateTimeException
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class DirectSyncResult {
     data class Success(val syncedCount: Int) : DirectSyncResult()
@@ -31,11 +33,15 @@ sealed class DirectSyncResult {
 object ImmediateSyncManager {
     private const val TAG = "ImmediateSyncManager"
     private const val BATCH_SIZE = 50
+    private const val MAX_ITEM_FAILURES = 5
     private const val WAKELOCK_TAG = "notifysync:immediate_sync_wakelock"
     private const val WAKELOCK_TIMEOUT_MS = 25_000L
 
     private val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val syncMutex = Mutex()
+    private val triggerLock = Any()
+    private val syncRequested = AtomicBoolean(false)
+    private var triggerJob: Job? = null
     private val gson = Gson()
 
     /**
@@ -44,27 +50,40 @@ object ImmediateSyncManager {
      */
     fun triggerSync(context: Context) {
         val appContext = context.applicationContext
-        syncScope.launch {
-            val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG)?.apply {
-                setReferenceCounted(false)
-                acquire(WAKELOCK_TIMEOUT_MS)
-            }
-            try {
-                val result = syncPendingEvents(appContext)
-                if (result is DirectSyncResult.NetworkError) {
-                    // Fall back to WorkManager so it retries when connectivity is restored
-                    SyncScheduler.enqueue(appContext)
+        syncRequested.set(true)
+        synchronized(triggerLock) {
+            if (triggerJob?.isActive == true) return
+            triggerJob = syncScope.launch {
+                val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG)?.apply {
+                    setReferenceCounted(false)
+                    acquire(WAKELOCK_TIMEOUT_MS)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Immediate sync error", e)
-                SyncScheduler.enqueue(appContext)
-            } finally {
                 try {
-                    if (wakeLock?.isHeld == true) wakeLock.release()
-                } catch (_: Exception) {}
+                    while (syncRequested.getAndSet(false)) {
+                        when (syncPendingEvents(appContext)) {
+                            is DirectSyncResult.NetworkError,
+                            is DirectSyncResult.Error -> SyncScheduler.enqueue(appContext)
+                            is DirectSyncResult.Success,
+                            is DirectSyncResult.AuthError -> Unit
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "Immediate sync error", e)
+                    SyncScheduler.enqueue(appContext)
+                } finally {
+                    try {
+                        if (wakeLock?.isHeld == true) wakeLock.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not release immediate sync wake lock", e)
+                    }
+                    synchronized(triggerLock) {
+                        triggerJob = null
+                        if (syncRequested.get()) triggerSync(appContext)
+                    }
+                }
             }
         }
     }
@@ -144,6 +163,7 @@ object ImmediateSyncManager {
                         return@withLock DirectSyncResult.Success(totalSynced)
                     }
 
+                    var hasItemFailure = false
                     for (item in pendingItems) {
                         try {
                             when (item.type) {
@@ -175,6 +195,8 @@ object ImmediateSyncManager {
                                             if (resp.code() == 401 || resp.code() == 403) {
                                                 return@withLock DirectSyncResult.AuthError(resp.code())
                                             }
+                                            recordItemFailure(db, item.id, item.failureCount)
+                                            hasItemFailure = true
                                         }
                                     }
                                 }
@@ -206,6 +228,8 @@ object ImmediateSyncManager {
                                             if (resp.code() == 401 || resp.code() == 403) {
                                                 return@withLock DirectSyncResult.AuthError(resp.code())
                                             }
+                                            recordItemFailure(db, item.id, item.failureCount)
+                                            hasItemFailure = true
                                         }
                                     }
                                 }
@@ -218,6 +242,7 @@ object ImmediateSyncManager {
                             throw e
                         } catch (e: IOException) {
                             Log.w(TAG, "Network disconnected while syncing items: ${e.message}")
+                            recordItemFailure(db, item.id, item.failureCount)
                             db.queueDao().deleteSynced()
                             return@withLock DirectSyncResult.NetworkError("Network error: ${e.message}")
                         } catch (e: JsonParseException) {
@@ -225,16 +250,40 @@ object ImmediateSyncManager {
                             db.queueDao().delete(item.id)
                         } catch (e: Exception) {
                             Log.e(TAG, "Error syncing item ${item.id}", e)
+                            recordItemFailure(db, item.id, item.failureCount)
+                            hasItemFailure = true
                         }
                     }
 
                     db.queueDao().deleteSynced()
+                    if (hasItemFailure) {
+                        return@withLock DirectSyncResult.Error(
+                            "One or more queued events could not be sent"
+                        )
+                    }
                 }
             } finally {
                 socketClient?.close()
                 prefs.saveLastSyncTime(System.currentTimeMillis())
             }
             DirectSyncResult.Success(totalSynced)
+        }
+    }
+
+    private suspend fun recordItemFailure(
+        db: QueueDatabase,
+        itemId: Int,
+        previousFailureCount: Int
+    ) {
+        val updated = db.queueDao().incrementFailureCount(itemId)
+        if (updated == 0) return
+
+        val failureCount = previousFailureCount + 1
+        if (failureCount >= MAX_ITEM_FAILURES) {
+            db.queueDao().delete(itemId)
+            Log.e(TAG, "Discarded queue item $itemId after $failureCount failed attempts")
+        } else {
+            Log.w(TAG, "Queue item $itemId failed ($failureCount/$MAX_ITEM_FAILURES)")
         }
     }
 
@@ -249,5 +298,6 @@ object ImmediateSyncManager {
         } catch (e: DateTimeException) {
             throw JsonParseException("Invalid timestamp: $timestamp", e)
         }
+
     }
 }
